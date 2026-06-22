@@ -87,4 +87,46 @@ print(probegroup.get_global_device_channel_indices())
 fig, ax = plt.subplots()
 plot_probegroup(probegroup, with_contact_id=True, same_axes=True, ax=ax)
 
+##############################################################################
+# Reordering contacts with a global contact order
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# By default the contact order of a `ProbeGroup` is the "natural" one: the
+# contacts of each probe are stacked one probe after the other. But sometimes
+# the contacts of the different probes are *interleaved* in the recording file
+# (e.g. the acquisition system alternates between probes sample by sample).
+#
+# `ProbeGroup.set_global_contact_order()` lets us store this external ordering.
+# The order is an array of indices into the natural (stacked) order, and it is
+# applied whenever the group is exported with `to_numpy()` / `to_dataframe()`.
+
+probegroup = ProbeGroup()
+probegroup.add_probe(probe0.copy())
+probegroup.add_probe(probe1.copy())
+
+n = probegroup.get_contact_count()
+print("default global contact order:", probegroup._global_contact_order)
+
+# interleave probe0 and probe1 contacts as they appear in the recording file
+global_contact_order = np.zeros(n, dtype="int64")
+global_contact_order[0::2] = np.arange(0, n // 2)        # probe0 contacts
+global_contact_order[1::2] = np.arange(n // 2, n)        # probe1 contacts
+probegroup.set_global_contact_order(global_contact_order)
+
+##############################################################################
+# Now `to_numpy()` returns the contacts in the interleaved order: the
+# ``probe_index`` column alternates between the two probes.
+
+contact_vector = probegroup.to_numpy()
+print("probe_index in global order:", contact_vector["probe_index"][:8])
+
+##############################################################################
+# The global order interacts with `set_global_device_channel_indices()`: the
+# ``device_channel_indices`` you pass are interpreted in the (reordered) order
+# returned by `to_numpy()`, so they map directly onto the acquisition channels.
+
+probegroup.set_global_device_channel_indices(np.arange(n))
+print("device_channel_indices (global order):",
+      probegroup.to_numpy(complete=True)["device_channel_indices"][:8])
+
 plt.show()

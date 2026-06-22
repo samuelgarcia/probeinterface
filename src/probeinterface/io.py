@@ -326,7 +326,7 @@ def write_BIDS_probe(folder: str | Path, probe_or_probegroup: Probe | ProbeGroup
         probegroup = probe_or_probegroup
     else:
         raise TypeError(
-            f"probe_or_probegroup has to be" "of type Probe or ProbeGroup " f"not type: {type(probe_or_probegroup)}"
+            f"probe_or_probegroup has to be" "of type Probe or ProbeGroup not type: {type(probe_or_probegroup)}"
         )
     folder = Path(folder)
 
@@ -352,7 +352,7 @@ def write_BIDS_probe(folder: str | Path, probe_or_probegroup: Probe | ProbeGroup
             )
         if "type" not in probe.annotations:
             raise ValueError(
-                "Export to BIDS probe format requires " "the probe type to be specified as an " "annotation (type)"
+                "Export to BIDS probe format requires " "the probe type to be specified as an annotation (type)"
             )
 
     # extract all used annotation keys

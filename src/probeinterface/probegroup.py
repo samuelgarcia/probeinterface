@@ -9,21 +9,30 @@ class ProbeGroup:
 
     Internally, this is represented as a list of Probe object.
 
-    The ProbeGroup is the object saved in the json based probeinterface format, even if there only one probe.
+    The ProbeGroup is the object saved in the json based probeinterface format, even if there is only one probe.
 
     Tiny detail: when using `PropbeGroup.to_numpy()` / `PropbeGroup.to_dataframe()` by default the contact order
-    is the "natural" one (stacked order of each probe). But optionally, this order can be more complex, for instance
-    some contact of each probe are interleaved, in this case a optional reordering can be applied.
-
-
-
+    is the "natural" one (stacked order of each probe). An external contact order can be applied using the 
+    ``ProbeGroup.set_global_contact_order()`` method, and the contact order is then stored in the 
+    ``ProbeGroup._global_contact_order`` attribute. In this case, the contact order of the ProbeGroup is not "natural" 
+    anymore, but the one defined by the user. This is useful for instance when some contact of each probe are 
+    interleaved in the recording file.
     """
 
     def __init__(self):
         self.probes = []
+        self.probe_ids = []
         self._global_contact_order = None
 
-    def add_probe(self, probe: Probe) -> None:
+    def __repr__(self):
+        repr_str = f"ProbeGroup: {len(self.probes)} probes - {self.get_contact_count()} contacts"
+        if self._global_contact_order is not None:
+            repr_str += " (with custom global contact order)"
+        for probe, probe_id in zip(self.probes, self.probe_ids):
+            repr_str += f"\n\t{probe_id}: {probe}"
+        return repr_str
+
+    def add_probe(self, probe: Probe, probe_id: str = None) -> None:
         """
         Add an additional probe to the ProbeGroup
 
@@ -31,13 +40,35 @@ class ProbeGroup:
         ----------
         probe: Probe
             The probe to add to the ProbeGroup
+        probe_id: str, optional
+            The ID to assign to the probe. If None, a unique ID will be generated.
 
         """
         if len(self.probes) > 0:
             self._check_compatible(probe)
 
         self.probes.append(probe)
+        if probe_id is not None:
+            self.probe_ids.append(probe_id)
+        else:
+            self.probe_ids.append(f"probe_{len(self.probes)}")        
         probe._probe_group = self
+
+    def set_probe_ids(self, probe_ids: list) -> None:
+        """
+        Set the probe IDs for the ProbeGroup.
+
+        Parameters
+        ----------
+        probe_ids: list
+            A list of IDs to assign to the probes. 
+            The length of the list must match the number of probes in the ProbeGroup.
+        """
+        if len(probe_ids) != len(self.probes):
+            raise ValueError(
+                f"Length of probe_ids ({len(probe_ids)}) does not match number of probes ({len(self.probes)})"
+            )
+        self.probe_ids = probe_ids
 
     def _check_compatible(self, probe: Probe) -> None:
         if probe._probe_group is not None:
@@ -68,12 +99,7 @@ class ProbeGroup:
         copy: ProbeGroup
             A copy of the ProbeGroup
         """
-        copy = ProbeGroup()
-        for probe in self.probes:
-            copy.add_probe(probe.copy())
-        global_device_channel_indices = self.get_global_device_channel_indices()["device_channel_indices"]
-        copy.set_global_device_channel_indices(global_device_channel_indices)
-        return copy
+        return ProbeGroup.from_dict(self.to_dict(array_as_list=False))
 
     def get_contact_count(self) -> int:
         """
@@ -207,13 +233,13 @@ class ProbeGroup:
         """
         d = {}
         d["probes"] = []
-        for probe_ind, probe in enumerate(self.probes):
+        for probe in self.probes:
             probe_dict = probe.to_dict(array_as_list=array_as_list)
             d["probes"].append(probe_dict)
         if self._global_contact_order is not None:
             global_contact_order = self._global_contact_order
             if array_as_list:
-                global_contact_order = global_contact_order.to_list()
+                global_contact_order = global_contact_order.tolist()
             d["global_contact_order"] = global_contact_order
         return d
 
@@ -242,6 +268,7 @@ class ProbeGroup:
 
         return probegroup
 
+    # TODO: this should only return the device_channel_indices, not the probe_index!!!
     def get_global_device_channel_indices(self) -> np.ndarray:
         """
         Gets the global device channels indices and returns as
@@ -267,15 +294,15 @@ class ProbeGroup:
 
     def set_global_device_channel_indices(self, device_channel_indices: np.ndarray | list) -> None:
         """
-        Set global indices for all probes.
+        Set global device channel indices for all probes.
 
-        Important note : if the order of contacts is not "natural" then the device_channel_indices
-        is applied is the real/reordered contacts vector. In short, the device_channel_indices is zipped to
+        Important note: if the probegroup has ``_global_contact_order``, then the device_channel_indices
+        are reordered before being set. In short, the ``device_channel_indices`` is zipped to
         ProbeGroup.to_numpy() (always ordered).
 
         Parameters
         ----------
-        channels: np.ndarray | list
+        device_channel_indices: np.ndarray | list
             The device channal indices to be set
         """
         device_channel_indices = np.asarray(device_channel_indices)
@@ -308,7 +335,7 @@ class ProbeGroup:
         Returns
         -------
         contact_ids: np.ndarray
-            An array of the contaact ids across all probes
+            An array of the contact ids across all probes
         """
         contact_ids = self.to_numpy(complete=True)["contact_ids"]
         return contact_ids
@@ -368,11 +395,86 @@ class ProbeGroup:
 
         contact_arr = self.to_numpy(complete=True)
         contact_arr = contact_arr[selection]
+        original_probe_indices = np.unique(contact_arr["probe_index"])
         sliced_probe_group = ProbeGroup.from_numpy(contact_arr)
+        new_probe_indices = np.unique(sliced_probe_group.to_numpy(complete=True)["probe_index"])
 
-        # TODO annoatation probe per probe!!
+        # Map annotations of the original probegroup to the sliced one
+        new_probe_ids = [self.probe_ids[i] for i in original_probe_indices]
+        sliced_probe_group.set_probe_ids(new_probe_ids)
+        for original_probe_index, new_probe_index in zip(original_probe_indices, new_probe_indices):
+            orig_probe = self.probes[original_probe_index]
+            new_probe = sliced_probe_group.probes[new_probe_index]
+            
+            for k in orig_probe.annotations:
+                if k not in new_probe.annotations:
+                    new_probe.annotate(**{k: orig_probe.annotations[k]})
 
         return sliced_probe_group
+
+    def select_contacts(self, contact_ids: np.ndarray | list | None = None, probe_ids: np.ndarray | list | None = None) -> "ProbeGroup":
+        """
+        Get a copy of the ProbeGroup with a sub selection of contacts based on contact ids and probe ids.
+
+        Parameters
+        ----------
+        contact_ids : np.array or list or None, default: None
+            The contact ids to select. If None, all contacts are selected, but probe_ids must be provided.
+        probe_ids : np.array or list or None, default: None
+            The probe ids to select. If contact_ids are not unique across probes, 
+            then probe_ids should be provided to disambiguate. 
+            If contact_ids are unique across probes, then probe_ids can be None.
+
+        Returns
+        -------
+        sliced_probe_group: ProbeGroup
+            The sliced probe group
+        """
+        if contact_ids is None and probe_ids is None:
+            raise ValueError(
+                "Either contact_ids or probe_ids must be provided for selection."
+            )
+        if contact_ids is None:
+            contact_mask = np.ones(self.get_contact_count(), dtype=bool)
+        else:
+            contact_ids = np.asarray(contact_ids)
+            all_contact_ids = self.get_global_contact_ids()
+            contact_mask = np.isin(all_contact_ids, contact_ids)
+            if probe_ids is None:
+                # without probe_ids the selection must be unambiguous: every requested
+                # contact id must match a single contact across the whole ProbeGroup
+                matched_ids = all_contact_ids[contact_mask]
+                unique_ids, counts = np.unique(matched_ids, return_counts=True)
+                ambiguous_ids = unique_ids[counts > 1]
+                if ambiguous_ids.size > 0:
+                    raise ValueError(
+                        f"contact_ids {ambiguous_ids.tolist()} are not unique across probes, "
+                        "you should provide probe_ids to disambiguate"
+                    )
+        if probe_ids is None:
+            probe_mask = np.ones(self.get_contact_count(), dtype=bool)
+        else:
+            all_probe_ids = np.asarray(self.probe_ids)[self.to_numpy(complete=True)["probe_index"]]
+            probe_ids = np.asarray(probe_ids)
+            probe_mask = np.isin(all_probe_ids, probe_ids)
+        selection_mask = contact_mask & probe_mask
+        return self.get_slice(selection_mask)
+
+    def set_global_contact_order(self, global_contact_order: np.ndarray | list) -> None:
+        """
+        Set the global contact order for the ProbeGroup. This is useful when some contact of each probe are interleaved in the recording file.
+
+        Parameters
+        ----------
+        global_contact_order: np.ndarray | list
+            The global contact order to be set. It should be an array of indices that defines the new order of contacts across all probes.
+        """
+        global_contact_order = np.asarray(global_contact_order)
+        if global_contact_order.size != self.get_contact_count():
+            raise ValueError(
+                f"Wrong global contact order size {global_contact_order.size} for the number of channels {self.get_contact_count()}"
+            )
+        self._global_contact_order = global_contact_order
 
     def check_global_device_wiring_and_ids(self) -> None:
         # check unique device_channel_indices for !=-1
