@@ -494,30 +494,6 @@ class ProbeGroup:
         if valid_chans.size != np.unique(valid_chans).size:
             raise ValueError("channel device indices are not unique across probes")
 
-    # def auto_generate_probe_ids(self, *args, **kwargs) -> None:
-    #     """
-    #     Annotate all probes with unique probe_id values.
-
-    #     Parameters
-    #     ----------
-    #     *args: will be forwarded to `probeinterface.utils.generate_unique_ids`
-    #     **kwargs: will be forwarded to
-    #         `probeinterface.utils.generate_unique_ids`
-    #     """
-
-    #     if any("probe_id" in p.annotations for p in self.probes):
-    #         raise ValueError("Probe already has a `probe_id` annotation.")
-
-    #     if not args:
-    #         args = 1e7, 1e8
-    #     # 3rd argument has to be the number of probes
-    #     args = args[:2] + (len(self.probes),)
-
-    #     # creating unique probe ids in case probes do not have any yet
-    #     probe_ids = generate_unique_ids(*args, **kwargs).astype(str)
-    #     for pid, probe in enumerate(self.probes):
-    #         probe.annotate(probe_id=probe_ids[pid])
-
     def auto_generate_contact_ids(self, *args, **kwargs) -> None:
         """
         Annotate all contacts with unique contact_id values.
