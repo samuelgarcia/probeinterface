@@ -15,7 +15,7 @@ def _make_probegroup():
         probe.move([i * 100, i * 80])
         n = probe.get_contact_count()
         probe.set_device_channel_indices(np.arange(n) + nchan)
-        probegroup.add_probe(probe)
+        probegroup.add_probe(probe, probe_id=f"probe_00{i}")
         nchan += n
     return probegroup
 
@@ -39,17 +39,16 @@ def test_probegroup(probegroup):
 
     d = probegroup.to_dict()
     other = ProbeGroup.from_dict(d)
+    assert probegroup.probe_ids == other.probe_ids
 
     # checking automatic generation of ids with new dummy probes
     probegroup.probes = []
     for i in range(3):
-        probegroup.add_probe(generate_dummy_probe())
+        probegroup.add_probe(generate_dummy_probe(), probe_id=f"probe_00{i}")
     probegroup.auto_generate_contact_ids()
-    probegroup.auto_generate_probe_ids()
 
     for p in probegroup.probes:
         assert p.contact_ids is not None
-        assert "probe_id" in p.annotations
 
 
 def test_probegroup_3d():

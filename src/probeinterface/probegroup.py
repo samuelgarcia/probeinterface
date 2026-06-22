@@ -12,23 +12,23 @@ class ProbeGroup:
     The ProbeGroup is the object saved in the json based probeinterface format, even if there is only one probe.
 
     Tiny detail: when using `PropbeGroup.to_numpy()` / `PropbeGroup.to_dataframe()` by default the contact order
-    is the "natural" one (stacked order of each probe). An external contact order can be applied using the 
-    ``ProbeGroup.set_global_contact_order()`` method, and the contact order is then stored in the 
-    ``ProbeGroup._global_contact_order`` attribute. In this case, the contact order of the ProbeGroup is not "natural" 
-    anymore, but the one defined by the user. This is useful for instance when some contact of each probe are 
+    is the "natural" one (stacked order of each probe). An external contact order can be applied using the
+    ``ProbeGroup.set_global_contact_order()`` method, and the contact order is then stored in the
+    ``ProbeGroup._global_contact_order`` attribute. In this case, the contact order of the ProbeGroup is not "natural"
+    anymore, but the one defined by the user. This is useful for instance when some contact of each probe are
     interleaved in the recording file.
     """
 
     def __init__(self):
         self.probes = []
-        self.probe_ids = []
+        self._probe_ids = []
         self._global_contact_order = None
 
     def __repr__(self):
         repr_str = f"ProbeGroup: {len(self.probes)} probes - {self.get_contact_count()} contacts"
         if self._global_contact_order is not None:
             repr_str += " (with custom global contact order)"
-        for probe, probe_id in zip(self.probes, self.probe_ids):
+        for probe, probe_id in zip(self.probes, self._probe_ids):
             repr_str += f"\n\t{probe_id}: {probe}"
         return repr_str
 
@@ -49,26 +49,31 @@ class ProbeGroup:
 
         self.probes.append(probe)
         if probe_id is not None:
-            self.probe_ids.append(probe_id)
+            self._probe_ids.append(probe_id)
         else:
-            self.probe_ids.append(f"probe_{len(self.probes)}")        
+            self._probe_ids.append(f"probe_{len(self.probes)}")
         probe._probe_group = self
 
-    def set_probe_ids(self, probe_ids: list) -> None:
+    @property
+    def probe_ids(self) -> list:
+        return self._probe_ids
+
+    @probe_ids.setter
+    def probe_ids(self, probe_ids: list) -> None:
         """
         Set the probe IDs for the ProbeGroup.
 
         Parameters
         ----------
         probe_ids: list
-            A list of IDs to assign to the probes. 
+            A list of IDs to assign to the probes.
             The length of the list must match the number of probes in the ProbeGroup.
         """
         if len(probe_ids) != len(self.probes):
             raise ValueError(
                 f"Length of probe_ids ({len(probe_ids)}) does not match number of probes ({len(self.probes)})"
             )
-        self.probe_ids = probe_ids
+        self._probe_ids = probe_ids
 
     def _check_compatible(self, probe: Probe) -> None:
         if probe._probe_group is not None:
@@ -236,6 +241,7 @@ class ProbeGroup:
         for probe in self.probes:
             probe_dict = probe.to_dict(array_as_list=array_as_list)
             d["probes"].append(probe_dict)
+        d["probe_ids"] = self.probe_ids
         if self._global_contact_order is not None:
             global_contact_order = self._global_contact_order
             if array_as_list:
@@ -261,6 +267,9 @@ class ProbeGroup:
         for probe_dict in d["probes"]:
             probe = Probe.from_dict(probe_dict)
             probegroup.add_probe(probe)
+        probe_ids = d.get("probe_ids", None)
+        if probe_ids is not None:
+            probegroup.probe_ids = probe_ids
 
         global_contact_order = d.get("global_contact_order", None)
         if global_contact_order is not None:
@@ -401,18 +410,20 @@ class ProbeGroup:
 
         # Map annotations of the original probegroup to the sliced one
         new_probe_ids = [self.probe_ids[i] for i in original_probe_indices]
-        sliced_probe_group.set_probe_ids(new_probe_ids)
+        sliced_probe_group.probe_ids = new_probe_ids
         for original_probe_index, new_probe_index in zip(original_probe_indices, new_probe_indices):
             orig_probe = self.probes[original_probe_index]
             new_probe = sliced_probe_group.probes[new_probe_index]
-            
+
             for k in orig_probe.annotations:
                 if k not in new_probe.annotations:
                     new_probe.annotate(**{k: orig_probe.annotations[k]})
 
         return sliced_probe_group
 
-    def select_contacts(self, contact_ids: np.ndarray | list | None = None, probe_ids: np.ndarray | list | None = None) -> "ProbeGroup":
+    def select_contacts(
+        self, contact_ids: np.ndarray | list | None = None, probe_ids: np.ndarray | list | None = None
+    ) -> "ProbeGroup":
         """
         Get a copy of the ProbeGroup with a sub selection of contacts based on contact ids and probe ids.
 
@@ -421,8 +432,8 @@ class ProbeGroup:
         contact_ids : np.array or list or None, default: None
             The contact ids to select. If None, all contacts are selected, but probe_ids must be provided.
         probe_ids : np.array or list or None, default: None
-            The probe ids to select. If contact_ids are not unique across probes, 
-            then probe_ids should be provided to disambiguate. 
+            The probe ids to select. If contact_ids are not unique across probes,
+            then probe_ids should be provided to disambiguate.
             If contact_ids are unique across probes, then probe_ids can be None.
 
         Returns
@@ -431,9 +442,7 @@ class ProbeGroup:
             The sliced probe group
         """
         if contact_ids is None and probe_ids is None:
-            raise ValueError(
-                "Either contact_ids or probe_ids must be provided for selection."
-            )
+            raise ValueError("Either contact_ids or probe_ids must be provided for selection.")
         if contact_ids is None:
             contact_mask = np.ones(self.get_contact_count(), dtype=bool)
         else:
@@ -485,29 +494,29 @@ class ProbeGroup:
         if valid_chans.size != np.unique(valid_chans).size:
             raise ValueError("channel device indices are not unique across probes")
 
-    def auto_generate_probe_ids(self, *args, **kwargs) -> None:
-        """
-        Annotate all probes with unique probe_id values.
+    # def auto_generate_probe_ids(self, *args, **kwargs) -> None:
+    #     """
+    #     Annotate all probes with unique probe_id values.
 
-        Parameters
-        ----------
-        *args: will be forwarded to `probeinterface.utils.generate_unique_ids`
-        **kwargs: will be forwarded to
-            `probeinterface.utils.generate_unique_ids`
-        """
+    #     Parameters
+    #     ----------
+    #     *args: will be forwarded to `probeinterface.utils.generate_unique_ids`
+    #     **kwargs: will be forwarded to
+    #         `probeinterface.utils.generate_unique_ids`
+    #     """
 
-        if any("probe_id" in p.annotations for p in self.probes):
-            raise ValueError("Probe already has a `probe_id` annotation.")
+    #     if any("probe_id" in p.annotations for p in self.probes):
+    #         raise ValueError("Probe already has a `probe_id` annotation.")
 
-        if not args:
-            args = 1e7, 1e8
-        # 3rd argument has to be the number of probes
-        args = args[:2] + (len(self.probes),)
+    #     if not args:
+    #         args = 1e7, 1e8
+    #     # 3rd argument has to be the number of probes
+    #     args = args[:2] + (len(self.probes),)
 
-        # creating unique probe ids in case probes do not have any yet
-        probe_ids = generate_unique_ids(*args, **kwargs).astype(str)
-        for pid, probe in enumerate(self.probes):
-            probe.annotate(probe_id=probe_ids[pid])
+    #     # creating unique probe ids in case probes do not have any yet
+    #     probe_ids = generate_unique_ids(*args, **kwargs).astype(str)
+    #     for pid, probe in enumerate(self.probes):
+    #         probe.annotate(probe_id=probe_ids[pid])
 
     def auto_generate_contact_ids(self, *args, **kwargs) -> None:
         """
