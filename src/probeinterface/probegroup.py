@@ -20,15 +20,15 @@ class ProbeGroup:
     """
 
     def __init__(self):
-        self.probes = []
+        self._probes = []
         self._probe_ids = []
         self._global_contact_order = None
 
     def __repr__(self):
-        repr_str = f"ProbeGroup: {len(self.probes)} probes - {self.get_contact_count()} contacts"
+        repr_str = f"ProbeGroup: {len(self._probes)} probes - {self.get_contact_count()} contacts"
         if self._global_contact_order is not None:
             repr_str += " (with custom global contact order)"
-        for probe, probe_id in zip(self.probes, self._probe_ids):
+        for probe, probe_id in zip(self._probes, self._probe_ids):
             repr_str += f"\n\t{probe_id}: {probe}"
         return repr_str
 
@@ -44,15 +44,21 @@ class ProbeGroup:
             The ID to assign to the probe. If None, a unique ID will be generated.
 
         """
-        if len(self.probes) > 0:
+        if len(self._probes) > 0:
             self._check_compatible(probe)
 
-        self.probes.append(probe)
-        if probe_id is not None:
-            self._probe_ids.append(probe_id)
-        else:
-            self._probe_ids.append(f"probe_{len(self.probes)}")
+        if probe_id is None:
+            probe_id = f"{len(self._probes)}"
+        if probe_id in self._probe_ids:
+            raise ValueError(f"Probe ID '{probe_id}' is already used in this ProbeGroup.")
+        self._probe_ids.append(probe_id)
+
+        self._probes.append(probe)
         probe._probe_group = self
+
+    @property
+    def probes(self) -> list:
+        return self._probes
 
     @property
     def probe_ids(self) -> list:
@@ -69,9 +75,9 @@ class ProbeGroup:
             A list of IDs to assign to the probes.
             The length of the list must match the number of probes in the ProbeGroup.
         """
-        if len(probe_ids) != len(self.probes):
+        if len(probe_ids) != len(self._probes):
             raise ValueError(
-                f"Length of probe_ids ({len(probe_ids)}) does not match number of probes ({len(self.probes)})"
+                f"Length of probe_ids ({len(probe_ids)}) does not match number of probes ({len(self._probes)})"
             )
         self._probe_ids = probe_ids
 
@@ -87,9 +93,11 @@ class ProbeGroup:
             )
 
         # check global channel maps
-        self.probes.append(probe)
+        self._probes.append(probe)
+        self._probe_ids.append(f"{len(self._probes)-1}")
         self.check_global_device_wiring_and_ids()
-        self.probes = self.probes[:-1]
+        self._probes = self.probes[:-1]
+        self._probe_ids = self.probe_ids[:-1]
 
     @property
     def ndim(self) -> int:
@@ -133,7 +141,7 @@ class ProbeGroup:
         probe_arr = []
 
         # loop over probes to get all fields
-        dtype = [("probe_index", "int64")]
+        dtype = [("probe_index", "int64"), ("probe_id", "U100")]
         fields = []
         for probe_index, probe in enumerate(self.probes):
             arr = probe.to_numpy(complete=complete)
@@ -148,6 +156,7 @@ class ProbeGroup:
             arr = probe_arr[probe_index]
             arr_ext = np.zeros(probe.get_contact_count(), dtype=dtype)
             arr_ext["probe_index"] = probe_index
+            arr_ext["probe_id"] = self._probe_ids[probe_index]
             for k in fields:
                 if k in arr.dtype.fields:
                     arr_ext[k] = arr[k]
@@ -185,12 +194,13 @@ class ProbeGroup:
         if is_interleaved:
             global_contact_order = []
 
-        probes_indices = np.unique(arr["probe_index"])
+        probes_indices = np.sort(np.unique(arr["probe_index"]))
         probegroup = ProbeGroup()
         for probe_index in probes_indices:
             mask = arr["probe_index"] == probe_index
+            probe_id = arr["probe_id"][mask][0]
             probe = Probe.from_numpy(arr[mask])
-            probegroup.add_probe(probe)
+            probegroup.add_probe(probe, probe_id=probe_id)
 
             if is_interleaved:
                 global_contact_order.append(np.flatnonzero(mask))
@@ -264,12 +274,12 @@ class ProbeGroup:
             The instantiated ProbeGroup object
         """
         probegroup = ProbeGroup()
-        for probe_dict in d["probes"]:
-            probe = Probe.from_dict(probe_dict)
-            probegroup.add_probe(probe)
         probe_ids = d.get("probe_ids", None)
-        if probe_ids is not None:
-            probegroup.probe_ids = probe_ids
+        if probe_ids is None:
+            probe_ids = [str(i) for i in range(len(d["probes"]))]
+        for probe_id, probe_dict in zip(probe_ids, d["probes"]):
+            probe = Probe.from_dict(probe_dict)
+            probegroup.add_probe(probe, probe_id=probe_id)
 
         global_contact_order = d.get("global_contact_order", None)
         if global_contact_order is not None:
@@ -404,16 +414,12 @@ class ProbeGroup:
 
         contact_arr = self.to_numpy(complete=True)
         contact_arr = contact_arr[selection]
-        original_probe_indices = np.unique(contact_arr["probe_index"])
         sliced_probe_group = ProbeGroup.from_numpy(contact_arr)
-        new_probe_indices = np.unique(sliced_probe_group.to_numpy(complete=True)["probe_index"])
 
         # Map annotations of the original probegroup to the sliced one
-        new_probe_ids = [self.probe_ids[i] for i in original_probe_indices]
-        sliced_probe_group.probe_ids = new_probe_ids
-        for original_probe_index, new_probe_index in zip(original_probe_indices, new_probe_indices):
+        for probe_id, new_probe in zip(sliced_probe_group.probe_ids, sliced_probe_group.probes):
+            original_probe_index = self.probe_ids.index(probe_id)
             orig_probe = self.probes[original_probe_index]
-            new_probe = sliced_probe_group.probes[new_probe_index]
 
             for k in orig_probe.annotations:
                 if k not in new_probe.annotations:
@@ -421,88 +427,99 @@ class ProbeGroup:
 
         return sliced_probe_group
 
-    def select_contacts(
-        self, contact_ids: np.ndarray | list | None = None, probe_ids: np.ndarray | list | None = None
-    ) -> "ProbeGroup":
+    def select_probes(self, probe_ids: str | np.ndarray | list) -> "ProbeGroup":
         """
-        Get a copy of the ProbeGroup with a sub selection of contacts based on contact ids and probe ids.
+        Get a copy of the ProbeGroup with a sub selection of probes based on probe ids.
 
         Parameters
         ----------
-        contact_ids : np.array or list or None, default: None
-            The contact ids to select. If None, all contacts are selected, but probe_ids must be provided.
-        probe_ids : np.array or list or None, default: None
-            The probe ids to select. If contact_ids are not unique across probes,
-            then probe_ids should be provided to disambiguate.
-            If contact_ids are unique across probes, then probe_ids can be None.
+        probe_ids : str | np.array or list
+            The probe id or ids to select.
 
         Returns
         -------
         sliced_probe_group: ProbeGroup
             The sliced probe group
         """
-        if contact_ids is None and probe_ids is None:
-            raise ValueError("Either contact_ids or probe_ids must be provided for selection.")
+        if probe_ids is None:
+            raise ValueError("probe_ids must be provided for selection.")
 
+        if isinstance(probe_ids, str):
+            probe_ids = [probe_ids]
+
+        # selection is over the global contact vector, following the requested probe order
+        all_probe_ids = self.to_numpy(complete=True)["probe_id"]
+        probe_ids = np.asarray(probe_ids)
+        blocks = [np.flatnonzero(all_probe_ids == probe_id) for probe_id in probe_ids]
+
+        selection = np.concatenate(blocks) if len(blocks) else np.array([], dtype=int)
+        return self.get_slice(selection)
+
+    def select_contacts(
+        self, contact_ids: np.ndarray | list, probe_ids: np.ndarray | list | None = None
+    ) -> "ProbeGroup":
+        """
+        Get a copy of the ProbeGroup with a sub selection of contacts based on contact ids and probe ids.
+
+        Parameters
+        ----------
+        contact_ids : np.array or list
+            The contact ids to select.
+        probe_ids : np.array or list or None, default: None
+            If multiple probes and contact ids not unique across probes, an array with the same length
+            as contact ids to specify which probe each contact id belongs to.
+
+        Returns
+        -------
+        sliced_probe_group: ProbeGroup
+            The sliced probe group
+        """
         # both arrays are in the global contact order
         arr = self.to_numpy(complete=True)
         all_contact_ids = arr["contact_ids"]
-        all_probe_ids = np.asarray(self.probe_ids)[arr["probe_index"]]
+        all_probe_ids = arr["probe_id"]
 
-        if contact_ids is None:
-            # select whole probes, following the requested probe_ids order
-            probe_ids = np.asarray(probe_ids)
-            blocks = [np.flatnonzero(all_probe_ids == probe_id) for probe_id in probe_ids]
-        else:
-            contact_ids = np.asarray(contact_ids)
+        contact_ids = np.asarray(contact_ids)
+
+        if probe_ids is None:
+            # without probe_ids the request must be unambiguous: each requested contact
+            # id must appear once in the request and match a single contact in the group
             unique_requested, counts = np.unique(contact_ids, return_counts=True)
             duplicated = unique_requested[counts > 1]
             if duplicated.size > 0:
                 raise ValueError(
                     f"contact_ids must be unique, but {duplicated.tolist()} appear more than once. "
-                    "Contact ids are unique across probes; if the same contact id is on multiple "
-                    "probes, use probe_ids to disambiguate."
+                    "If the same contact id is on multiple probes, use probe_ids to disambiguate."
                 )
-            if probe_ids is None:
-                # without probe_ids the selection must be unambiguous: every requested
-                # contact id must match a single contact across the whole ProbeGroup
-                matched_ids = all_contact_ids[np.isin(all_contact_ids, contact_ids)]
-                unique_ids, counts = np.unique(matched_ids, return_counts=True)
-                ambiguous_ids = unique_ids[counts > 1]
-                if ambiguous_ids.size > 0:
-                    raise ValueError(
-                        f"contact_ids {ambiguous_ids.tolist()} are not unique across probes, "
-                        "you should provide probe_ids to disambiguate"
-                    )
-                # follow the requested contact_ids order
-                blocks = [np.flatnonzero(all_contact_ids == contact_id) for contact_id in contact_ids]
-            else:
-                # contact_ids drives the order, probe_ids breaks ties between duplicated ids
-                probe_ids = np.asarray(probe_ids)
-                blocks = [
-                    np.flatnonzero((all_contact_ids == contact_id) & (all_probe_ids == probe_id))
-                    for contact_id in contact_ids
-                    for probe_id in probe_ids
-                ]
+            matched_ids = all_contact_ids[np.isin(all_contact_ids, contact_ids)]
+            unique_ids, match_counts = np.unique(matched_ids, return_counts=True)
+            ambiguous_ids = unique_ids[match_counts > 1]
+            if ambiguous_ids.size > 0:
+                raise ValueError(
+                    f"contact_ids {ambiguous_ids.tolist()} are not unique across probes, "
+                    "you should provide probe_ids to disambiguate"
+                )
+            # follow the requested contact_ids order
+            blocks = [np.flatnonzero(all_contact_ids == contact_id) for contact_id in contact_ids]
+        else:
+            # probe_ids is paired with contact_ids: probe_ids[i] tells which probe
+            # contact_ids[i] belongs to, disambiguating ids shared across probes
+            probe_ids = np.asarray(probe_ids)
+            if probe_ids.size != contact_ids.size:
+                raise ValueError(
+                    f"probe_ids must have the same length as contact_ids " f"({probe_ids.size} != {contact_ids.size})"
+                )
+            pairs = list(zip(contact_ids.tolist(), probe_ids.tolist()))
+            if len(set(pairs)) != len(pairs):
+                raise ValueError("(contact_id, probe_id) pairs must be unique")
+            # contact_ids drives the order, probe_ids breaks ties between duplicated ids
+            blocks = [
+                np.flatnonzero((all_contact_ids == contact_id) & (all_probe_ids == probe_id))
+                for contact_id, probe_id in zip(contact_ids, probe_ids)
+            ]
 
         selection = np.concatenate(blocks) if len(blocks) else np.array([], dtype=int)
         return self.get_slice(selection)
-
-    def set_global_contact_order(self, global_contact_order: np.ndarray | list) -> None:
-        """
-        Set the global contact order for the ProbeGroup. This is useful when some contact of each probe are interleaved in the recording file.
-
-        Parameters
-        ----------
-        global_contact_order: np.ndarray | list
-            The global contact order to be set. It should be an array of indices that defines the new order of contacts across all probes.
-        """
-        global_contact_order = np.asarray(global_contact_order)
-        if global_contact_order.size != self.get_contact_count():
-            raise ValueError(
-                f"Wrong global contact order size {global_contact_order.size} for the number of channels {self.get_contact_count()}"
-            )
-        self._global_contact_order = global_contact_order
 
     def check_global_device_wiring_and_ids(self) -> None:
         # check unique device_channel_indices for !=-1

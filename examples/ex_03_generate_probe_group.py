@@ -67,20 +67,17 @@ print(probegroup)
 print("probe_ids:", probegroup.probe_ids)
 
 ##############################################################################
-# `ProbeGroup.select_contacts()` returns a new `ProbeGroup` with a sub-selection
-# of contacts. The selection can be done by ``contact_ids``, by ``probe_ids``,
-# or by both at the same time.
-#
-# Selecting by ``probe_ids`` alone keeps every contact of the matching probes,
-# which is a convenient way to grab a whole hemisphere:
+# `ProbeGroup.select_probes()` returns a new `ProbeGroup` with a sub-selection
+# of probes given by probe_ids.
 
-left_hemisphere = probegroup.select_contacts(probe_ids=["left_hemisphere"])
-print("contacts in the left hemisphere:", left_hemisphere.get_contact_count())
+left_hemisphere_probe = probegroup.select_probes(probe_ids=["left_hemisphere"])
+print(left_hemisphere_probe)
 
 ##############################################################################
-# We can also select by ``contact_ids``. Note that if ``contact_ids`` are not 
-# unique across probes, the selection will be ambiguous and an error will be 
-# raised. In this case, providing ``probe_ids`` disambiguates the selection:
+# We can also select by specific contacts from a probegroup with the
+# ``select_contacts`` function. Note that if ``contact_ids`` are not
+# unique across probes, you need to disambiguate the selection by specifying the
+# probe_ids as well. Otherwise, a ValueError is raised.
 
 # check if any contact_id is not unique across probes
 contact_ids = probegroup.get_global_contact_ids()
@@ -91,14 +88,18 @@ if len(contact_ids) != len(set(contact_ids)):
 # Because the contact ids are not unique across probes, combining ``contact_ids``
 # with ``probe_ids`` lets us pull specific contacts from a single hemisphere:
 
-left_contacts = probegroup.select_contacts(contact_ids=["0", "1", "2"], probe_ids=["left_hemisphere"])
-print("contacts selected from the left hemisphere:", left_contacts.get_contact_count())
-
-left_and_right_contacts = probegroup.select_contacts(
+left_probegroup = probegroup.select_contacts(
     contact_ids=["0", "1", "2"],
-    probe_ids=["left_hemisphere", "right_hemisphere"]
+    probe_ids=["left_hemisphere", "left_hemisphere", "left_hemisphere"]
 )
-print("contacts selected from the left and right hemispheres:", left_and_right_contacts.get_contact_count())
+print(left_probegroup)
+
+# Now select contacts from both hemispheres by providing the corresponding probe_ids for each contact_id:
+left_and_right_probegroup = probegroup.select_contacts(
+    contact_ids=["0", "1", "2"],
+    probe_ids=["left_hemisphere", "right_hemisphere", "left_hemisphere"]
+)
+print(left_and_right_probegroup)
 
 # Without providing probe_ids, the selection is ambiguous and an error is raised:
 try:

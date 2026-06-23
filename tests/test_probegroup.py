@@ -42,7 +42,8 @@ def test_probegroup(probegroup):
     assert probegroup.probe_ids == other.probe_ids
 
     # checking automatic generation of ids with new dummy probes
-    probegroup.probes = []
+    probegroup._probes = []
+    probegroup._probe_ids = []
     for i in range(3):
         probegroup.add_probe(generate_dummy_probe(), probe_id=f"probe_00{i}")
     probegroup.auto_generate_contact_ids()
@@ -351,7 +352,7 @@ def test_get_slice_single_probe_keeps_probe_id_and_annotations():
 # ── global_contact_order : to_numpy/from_numpy, to_dict/from_dict, get_slice
 
 
-def test_reordred_probegroup(probegroup):
+def test_reordered_probegroup(probegroup):
     order = np.concatenate([np.arange(0, 96, 2), np.arange(95, 0, -2)])
 
     contact_vector = probegroup.to_numpy(complete=True)
@@ -374,86 +375,13 @@ def test_reordred_probegroup(probegroup):
 
     probegroup5 = ProbeGroup.from_dict(probegroup4.to_dict())
     assert probegroup5._global_contact_order is not None
-    contact_vector5 = probegroup3.to_numpy(complete=True)
+    contact_vector5 = probegroup5.to_numpy(complete=True)
     assert np.array_equal(contact_vector4, contact_vector5)
 
     # let go back to original order
     rev_order = np.argsort(order)
     probegroup6 = probegroup5.get_slice(rev_order)
     assert probegroup6._global_contact_order is None
-
-
-# ── set_global_contact_order() tests ────────────────────────────────────────
-
-
-def _reorder_indices():
-    """An interleaved order over the 96 contacts of the default probegroup."""
-    return np.concatenate([np.arange(0, 96, 2), np.arange(95, 0, -2)])
-
-
-def test_set_global_contact_order_reorders_to_numpy(probegroup):
-    """set_global_contact_order reorders the contact vector returned by to_numpy."""
-    order = _reorder_indices()
-    natural = probegroup.to_numpy(complete=True).copy()
-
-    probegroup.set_global_contact_order(order)
-
-    assert probegroup._global_contact_order is not None
-    reordered = probegroup.to_numpy(complete=True)
-    np.testing.assert_array_equal(reordered, natural[order])
-
-
-def test_set_global_contact_order_reorders_positions(probegroup):
-    """get_global_contact_positions reflects the custom order."""
-    order = _reorder_indices()
-    natural_positions = probegroup.get_global_contact_positions().copy()
-
-    probegroup.set_global_contact_order(order)
-
-    reordered_positions = probegroup.get_global_contact_positions()
-    np.testing.assert_array_equal(reordered_positions, natural_positions[order])
-
-
-def test_set_global_contact_order_wrong_size(probegroup):
-    """A global contact order that does not match the contact count raises ValueError."""
-    with pytest.raises(ValueError, match="Wrong global contact order size"):
-        probegroup.set_global_contact_order(np.arange(5))
-
-
-def test_set_global_contact_order_accepts_list(probegroup):
-    """A plain list is accepted and stored as an array."""
-    order = list(_reorder_indices())
-    probegroup.set_global_contact_order(order)
-    assert isinstance(probegroup._global_contact_order, np.ndarray)
-
-
-def test_set_global_contact_order_device_channel_indices_consistency(probegroup):
-    """
-    device_channel_indices are zipped to to_numpy() (which is reordered),
-    so setting them after a custom order must roundtrip through to_numpy.
-    """
-    order = _reorder_indices()
-    probegroup.set_global_contact_order(order)
-
-    n = probegroup.get_contact_count()
-    device_channel_indices = np.arange(n)
-    probegroup.set_global_device_channel_indices(device_channel_indices)
-
-    got = probegroup.to_numpy(complete=True)["device_channel_indices"]
-    np.testing.assert_array_equal(got, device_channel_indices)
-
-
-def test_set_global_contact_order_roundtrip_dict(probegroup):
-    """The custom order survives a to_dict/from_dict roundtrip."""
-    order = _reorder_indices()
-    probegroup.set_global_contact_order(order)
-
-    other = ProbeGroup.from_dict(probegroup.to_dict())
-    assert other._global_contact_order is not None
-    np.testing.assert_array_equal(
-        other.to_numpy(complete=True),
-        probegroup.to_numpy(complete=True),
-    )
 
 
 # ── select_contacts() tests ─────────────────────────────────────────────────
@@ -505,41 +433,27 @@ def test_select_contacts_ambiguous_ids_without_probe_ids_raises():
 
 
 def test_select_contacts_with_probe_ids():
-    """probe_ids disambiguate duplicated contact ids to a single probe."""
+    """probe_ids (paired with contact_ids) disambiguate duplicated contact ids."""
     pg = _probegroup_with_contact_ids(unique=False)
-    sub = pg.select_contacts(["c0", "c1"], probe_ids=["probe_1"])
+    sub = pg.select_contacts(["c0", "c1"], probe_ids=["1", "1"])
     assert sub.get_contact_count() == 2
     assert len(sub.probes) == 1
     np.testing.assert_array_equal(sorted(sub.get_global_contact_ids()), ["c0", "c1"])
 
 
-def test_select_contacts_probe_ids_subset_of_probes():
-    """probe_ids can restrict the selection to a subset of probes."""
+def test_select_contacts_same_id_across_probes_with_probe_ids():
+    """The same contact id can be selected from several probes using probe_ids."""
     pg = _probegroup_with_contact_ids(unique=False)
-    sub = pg.select_contacts(["c0"], probe_ids=["probe_1", "probe_3"])
+    sub = pg.select_contacts(["c0", "c0"], probe_ids=["0", "2"])
     assert sub.get_contact_count() == 2
     assert len(sub.probes) == 2
 
 
-def test_select_contacts_by_probe_ids_only():
-    """Selecting by probe_ids alone keeps every contact of the matching probes."""
+def test_select_contacts_probe_ids_length_mismatch_raises():
+    """probe_ids must have the same length as contact_ids."""
     pg = _probegroup_with_contact_ids(unique=False)
-    n_per_probe = pg.probes[0].get_contact_count()
-
-    sub = pg.select_contacts(probe_ids=["probe_1"])
-    assert sub.get_contact_count() == n_per_probe
-    assert len(sub.probes) == 1
-
-    sub_two = pg.select_contacts(probe_ids=["probe_1", "probe_3"])
-    assert sub_two.get_contact_count() == 2 * n_per_probe
-    assert len(sub_two.probes) == 2
-
-
-def test_select_contacts_requires_some_selection():
-    """Calling with neither contact_ids nor probe_ids raises ValueError."""
-    pg = _probegroup_with_contact_ids(unique=False)
-    with pytest.raises(ValueError, match="Either contact_ids or probe_ids"):
-        pg.select_contacts()
+    with pytest.raises(ValueError, match="same length as contact_ids"):
+        pg.select_contacts(["c0", "c1"], probe_ids=["0"])
 
 
 def test_select_contacts_too_many_ids_without_probe_ids_raises():
@@ -570,13 +484,76 @@ def test_select_contacts_follows_requested_order():
     np.testing.assert_array_equal(sub.get_global_contact_positions(), expected)
 
 
-def test_select_contacts_by_probe_ids_follows_requested_order():
-    """Selecting by probe_ids alone follows the requested probe order."""
+def test_select_probes_keeps_every_contact_of_matching_probes():
+    """select_probes keeps every contact of the matching probes."""
     pg = _probegroup_with_contact_ids(unique=False)
-    sub = pg.select_contacts(probe_ids=["probe_3", "probe_1"])
-    # probe_3's contacts come first since it is requested first
+    n_per_probe = pg.probes[0].get_contact_count()
+
+    sub_str = pg.select_probes("1")
+    assert sub_str.get_contact_count() == n_per_probe
+    assert len(sub_str.probes) == 1
+
+    sub_one = pg.select_probes(["1"])
+    assert sub_one.get_contact_count() == n_per_probe
+    assert len(sub_one.probes) == 1
+
+    sub_two = pg.select_probes(["1", "2"])
+    assert sub_two.get_contact_count() == 2 * n_per_probe
+    assert len(sub_two.probes) == 2
+
+
+def test_select_probes_follows_requested_order():
+    """select_probes follows the requested probe order."""
+    pg = _probegroup_with_contact_ids(unique=False)
+    sub = pg.select_probes(["2", "0"])
+    # probe "2"'s contacts come first since it is requested first
     probe_index_per_contact = sub.to_numpy(complete=True)["probe_index"]
-    assert probe_index_per_contact[0] == sub.probe_ids.index("probe_3")
+    assert probe_index_per_contact[0] == sub.probe_ids.index("2")
+
+
+def test_select_probes_single_probe():
+    """Selecting a single probe keeps a single probe with its contact ids."""
+    pg = _probegroup_with_contact_ids(unique=True)
+    sub = pg.select_probes(["1"])
+    assert len(sub.probes) == 1
+    assert sub.probe_ids == ["1"]
+    assert all(cid.startswith("p1") for cid in sub.get_global_contact_ids())
+
+
+def test_select_probes_preserves_probe_ids():
+    """The selected ProbeGroup keeps the requested probe ids."""
+    pg = _probegroup_with_contact_ids(unique=False)
+    sub = pg.select_probes(["2", "0"])
+    assert set(sub.probe_ids) == {"0", "2"}
+
+
+def test_select_probes_preserves_positions():
+    """Contacts of the selected probes keep their global positions."""
+    pg = _probegroup_with_contact_ids(unique=True)
+
+    all_ids = pg.get_global_contact_ids()
+    all_positions = pg.get_global_contact_positions()
+
+    sub = pg.select_probes(["0", "2"])
+    sub_ids = sub.get_global_contact_ids()
+    sub_positions = sub.get_global_contact_positions()
+    for cid, pos in zip(sub_ids, sub_positions):
+        np.testing.assert_array_equal(pos, all_positions[all_ids == cid][0])
+
+
+def test_select_probes_none_raises():
+    """Calling select_probes without probe_ids raises a ValueError."""
+    pg = _probegroup_with_contact_ids(unique=False)
+    with pytest.raises(ValueError, match="probe_ids must be provided"):
+        pg.select_probes(None)
+
+
+def test_select_probes_all_probes():
+    """Selecting all probes returns the whole ProbeGroup."""
+    pg = _probegroup_with_contact_ids(unique=True)
+    sub = pg.select_probes(["0", "1", "2"])
+    assert sub.get_contact_count() == pg.get_contact_count()
+    assert len(sub.probes) == len(pg.probes)
 
 
 def test_select_contacts_duplicated_ids_raises():
@@ -608,4 +585,4 @@ if __name__ == "__main__":
 
     # test_probegroup(probegroup)
     # test_probegroup_3d()
-    test_reordred_probegroup(probegroup)
+    test_reordered_probegroup(probegroup)
