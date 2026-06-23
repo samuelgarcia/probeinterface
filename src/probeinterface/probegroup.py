@@ -7,16 +7,16 @@ class ProbeGroup:
     """
     Class to handle a group of Probe objects and the global wiring to a device.
 
-    Internally, this is represented as a list of Probe object.
+    Internally, this is represented as a list of Probe objects.
 
     The ProbeGroup is the object saved in the json based probeinterface format, even if there is only one probe.
 
-    Tiny detail: when using `PropbeGroup.to_numpy()` / `PropbeGroup.to_dataframe()` by default the contact order
-    is the "natural" one (stacked order of each probe). An external contact order can be applied using the
-    ``ProbeGroup.set_global_contact_order()`` method, and the contact order is then stored in the
-    ``ProbeGroup._global_contact_order`` attribute. In this case, the contact order of the ProbeGroup is not "natural"
-    anymore, but the one defined by the user. This is useful for instance when some contact of each probe are
-    interleaved in the recording file.
+    Tiny detail about contact order: ``ProbeGroup.to_numpy()`` / ``ProbeGroup.to_dataframe()`` return contacts in the
+    "natural" order (the contacts of each probe stacked one probe after another) unless contacts have become
+    interleaved across probes. Interleaving can arise from ``get_slice`` or ``select_contacts`` (e.g. selecting
+    contacts from different probes in an alternating order). When it does, the resulting ``ProbeGroup`` keeps a custom
+    contact order in the ``_global_contact_order`` attribute so the requested order is preserved. This order is only
+    ever set internally; there is no public method to set it.
     """
 
     def __init__(self):

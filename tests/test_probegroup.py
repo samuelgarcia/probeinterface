@@ -384,6 +384,57 @@ def test_reordered_probegroup(probegroup):
     assert probegroup6._global_contact_order is None
 
 
+def _interleaved_order():
+    """An order interleaving contacts across probes (non-natural)."""
+    return np.concatenate([np.arange(0, 96, 2), np.arange(95, 0, -2)])
+
+
+def test_global_contact_order_natural_is_none(probegroup):
+    """A non-interleaved (natural) contact vector does not set a custom order."""
+    pg = ProbeGroup.from_numpy(probegroup.to_numpy(complete=True))
+    assert pg._global_contact_order is None
+
+
+def test_global_contact_order_positions_reflect_order(probegroup):
+    """get_global_contact_positions follows the custom global contact order."""
+    order = _interleaved_order()
+    natural_positions = probegroup.get_global_contact_positions().copy()
+
+    pg = ProbeGroup.from_numpy(probegroup.to_numpy(complete=True)[order])
+    assert pg._global_contact_order is not None
+    np.testing.assert_array_equal(pg.get_global_contact_positions(), natural_positions[order])
+
+
+def test_global_contact_order_ids_reflect_order(probegroup):
+    """get_global_contact_ids follows the custom global contact order."""
+    order = _interleaved_order()
+    natural_ids = probegroup.get_global_contact_ids().copy()
+
+    pg = ProbeGroup.from_numpy(probegroup.to_numpy(complete=True)[order])
+    np.testing.assert_array_equal(pg.get_global_contact_ids(), natural_ids[order])
+
+
+def test_global_contact_order_device_channel_indices_roundtrip(probegroup):
+    """
+    With a custom global contact order, device_channel_indices are zipped to the
+    (reordered) to_numpy() vector. Setting them must roundtrip through both
+    to_numpy() and get_global_device_channel_indices().
+    """
+    order = _interleaved_order()
+    pg = ProbeGroup.from_numpy(probegroup.to_numpy(complete=True)[order])
+    assert pg._global_contact_order is not None
+
+    n = pg.get_contact_count()
+    device_channel_indices = np.arange(n)
+    pg.set_global_device_channel_indices(device_channel_indices)
+
+    got = pg.to_numpy(complete=True)["device_channel_indices"]
+    np.testing.assert_array_equal(got, device_channel_indices)
+
+    got_getter = pg.get_global_device_channel_indices()["device_channel_indices"]
+    np.testing.assert_array_equal(got_getter, device_channel_indices)
+
+
 # ── select_contacts() tests ─────────────────────────────────────────────────
 
 
