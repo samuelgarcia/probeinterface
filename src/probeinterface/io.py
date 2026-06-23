@@ -325,7 +325,7 @@ def write_BIDS_probe(folder: str | Path, probe_or_probegroup: Probe | ProbeGroup
         probegroup = probe_or_probegroup
     else:
         raise TypeError(
-            f"probe_or_probegroup has to beof type Probe or ProbeGroup not type: {type(probe_or_probegroup)}"
+            f"probe_or_probegroup has to be of type Probe or ProbeGroup not type: {type(probe_or_probegroup)}"
         )
     folder = Path(folder)
 
