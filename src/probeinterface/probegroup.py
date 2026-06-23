@@ -443,16 +443,30 @@ class ProbeGroup:
         """
         if contact_ids is None and probe_ids is None:
             raise ValueError("Either contact_ids or probe_ids must be provided for selection.")
+
+        # both arrays are in the global contact order
+        arr = self.to_numpy(complete=True)
+        all_contact_ids = arr["contact_ids"]
+        all_probe_ids = np.asarray(self.probe_ids)[arr["probe_index"]]
+
         if contact_ids is None:
-            contact_mask = np.ones(self.get_contact_count(), dtype=bool)
+            # select whole probes, following the requested probe_ids order
+            probe_ids = np.asarray(probe_ids)
+            blocks = [np.flatnonzero(all_probe_ids == probe_id) for probe_id in probe_ids]
         else:
             contact_ids = np.asarray(contact_ids)
-            all_contact_ids = self.get_global_contact_ids()
-            contact_mask = np.isin(all_contact_ids, contact_ids)
+            unique_requested, counts = np.unique(contact_ids, return_counts=True)
+            duplicated = unique_requested[counts > 1]
+            if duplicated.size > 0:
+                raise ValueError(
+                    f"contact_ids must be unique, but {duplicated.tolist()} appear more than once. "
+                    "Contact ids are unique across probes; if the same contact id is on multiple "
+                    "probes, use probe_ids to disambiguate."
+                )
             if probe_ids is None:
                 # without probe_ids the selection must be unambiguous: every requested
                 # contact id must match a single contact across the whole ProbeGroup
-                matched_ids = all_contact_ids[contact_mask]
+                matched_ids = all_contact_ids[np.isin(all_contact_ids, contact_ids)]
                 unique_ids, counts = np.unique(matched_ids, return_counts=True)
                 ambiguous_ids = unique_ids[counts > 1]
                 if ambiguous_ids.size > 0:
@@ -460,14 +474,19 @@ class ProbeGroup:
                         f"contact_ids {ambiguous_ids.tolist()} are not unique across probes, "
                         "you should provide probe_ids to disambiguate"
                     )
-        if probe_ids is None:
-            probe_mask = np.ones(self.get_contact_count(), dtype=bool)
-        else:
-            all_probe_ids = np.asarray(self.probe_ids)[self.to_numpy(complete=True)["probe_index"]]
-            probe_ids = np.asarray(probe_ids)
-            probe_mask = np.isin(all_probe_ids, probe_ids)
-        selection_mask = contact_mask & probe_mask
-        return self.get_slice(selection_mask)
+                # follow the requested contact_ids order
+                blocks = [np.flatnonzero(all_contact_ids == contact_id) for contact_id in contact_ids]
+            else:
+                # contact_ids drives the order, probe_ids breaks ties between duplicated ids
+                probe_ids = np.asarray(probe_ids)
+                blocks = [
+                    np.flatnonzero((all_contact_ids == contact_id) & (all_probe_ids == probe_id))
+                    for contact_id in contact_ids
+                    for probe_id in probe_ids
+                ]
+
+        selection = np.concatenate(blocks) if len(blocks) else np.array([], dtype=int)
+        return self.get_slice(selection)
 
     def set_global_contact_order(self, global_contact_order: np.ndarray | list) -> None:
         """

@@ -554,6 +554,38 @@ def test_select_contacts_too_many_ids_without_probe_ids_raises():
         pg.select_contacts(too_many)
 
 
+def test_select_contacts_follows_requested_order():
+    """The selection follows the order of the provided contact_ids, even across probes."""
+    pg = _probegroup_with_contact_ids(unique=True)
+    # interleave contacts from different probes in a non-natural order
+    selected_ids = ["p2c5", "p0c1", "p1c0", "p0c0"]
+    sub = pg.select_contacts(selected_ids)
+
+    np.testing.assert_array_equal(sub.get_global_contact_ids(), selected_ids)
+
+    # positions must follow the same order as the requested ids
+    all_ids = pg.get_global_contact_ids()
+    all_positions = pg.get_global_contact_positions()
+    expected = np.vstack([all_positions[all_ids == cid] for cid in selected_ids])
+    np.testing.assert_array_equal(sub.get_global_contact_positions(), expected)
+
+
+def test_select_contacts_by_probe_ids_follows_requested_order():
+    """Selecting by probe_ids alone follows the requested probe order."""
+    pg = _probegroup_with_contact_ids(unique=False)
+    sub = pg.select_contacts(probe_ids=["probe_3", "probe_1"])
+    # probe_3's contacts come first since it is requested first
+    probe_index_per_contact = sub.to_numpy(complete=True)["probe_index"]
+    assert probe_index_per_contact[0] == sub.probe_ids.index("probe_3")
+
+
+def test_select_contacts_duplicated_ids_raises():
+    """Passing the same contact id more than once raises a ValueError."""
+    pg = _probegroup_with_contact_ids(unique=True)
+    with pytest.raises(ValueError, match="must be unique"):
+        pg.select_contacts(["p0c0", "p0c1", "p0c0"])
+
+
 def test_select_contacts_preserves_positions():
     """Selected contacts keep their global positions."""
     pg = _probegroup_with_contact_ids(unique=True)
