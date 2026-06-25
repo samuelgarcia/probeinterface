@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 from .utils import generate_unique_ids
 from .probe import Probe
@@ -28,8 +30,6 @@ class ProbeGroup:
         repr_str = f"ProbeGroup: {len(self._probes)} probes - {self.get_contact_count()} contacts"
         if self._global_contact_order is not None:
             repr_str += " (with custom global contact order)"
-        for probe, probe_id in zip(self._probes, self._probe_ids):
-            repr_str += f"\n\t{probe_id}: {probe}"
         return repr_str
 
     def add_probe(self, probe: Probe, probe_id: str = None) -> None:
@@ -41,20 +41,38 @@ class ProbeGroup:
         probe: Probe
             The probe to add to the ProbeGroup
         probe_id: str, optional
-            The ID to assign to the probe. If None, a unique ID will be generated.
+            The ID to assign to the probe. If None, a unique ID will be generated,
+            unless a probe_id is already present in the probe's annotations,
+            in which case that will be used.
 
         """
         if len(self._probes) > 0:
             self._check_compatible(probe)
 
+        probe_id_annotation = probe.annotations.get("probe_id", None)
+
         if probe_id is None:
-            probe_id = f"{len(self._probes)}"
+            if probe_id_annotation is not None:
+                probe_id = probe_id_annotation
+            else:
+                probe_id = f"{len(self._probes)}"
+        else:
+            if probe_id_annotation is not None and probe_id != probe_id_annotation:
+                warnings.warn(
+                    f"Provided probe_id '{probe_id}' does not match probe's annotation 'probe_id' "
+                    f"({probe_id_annotation}). Using provided probe_id."
+                )
+
         if probe_id in self._probe_ids:
             raise ValueError(f"Probe ID '{probe_id}' is already used in this ProbeGroup.")
         self._probe_ids.append(probe_id)
 
         self._probes.append(probe)
         probe._probe_group = self
+
+    @property
+    def probe_dict(self) -> dict:
+        return {probe_id: probe for probe_id, probe in zip(self._probe_ids, self._probes)}
 
     @property
     def probes(self) -> list:
@@ -447,13 +465,14 @@ class ProbeGroup:
         if isinstance(probe_ids, str):
             probe_ids = [probe_ids]
 
-        # selection is over the global contact vector, following the requested probe order
-        all_probe_ids = self.to_numpy(complete=True)["probe_id"]
         probe_ids = np.asarray(probe_ids)
-        blocks = [np.flatnonzero(all_probe_ids == probe_id) for probe_id in probe_ids]
+        if any(probe_id not in self.probe_ids for probe_id in probe_ids):
+            raise ValueError(f"Some probe_ids {probe_ids} are not present in the ProbeGroup.")
 
-        selection = np.concatenate(blocks) if len(blocks) else np.array([], dtype=int)
-        return self.get_slice(selection)
+        # selection keeps the order of the to_numpy vector
+        all_probe_ids = self.to_numpy(complete=True)["probe_id"]
+        keep_inds = np.flatnonzero(np.isin(all_probe_ids, probe_ids))
+        return self.get_slice(keep_inds)
 
     def select_contacts(
         self, contact_ids: np.ndarray | list, probe_ids: np.ndarray | list | None = None
@@ -491,35 +510,35 @@ class ProbeGroup:
                     f"contact_ids must be unique, but {duplicated.tolist()} appear more than once. "
                     "If the same contact id is on multiple probes, use probe_ids to disambiguate."
                 )
-            matched_ids = all_contact_ids[np.isin(all_contact_ids, contact_ids)]
-            unique_ids, match_counts = np.unique(matched_ids, return_counts=True)
-            ambiguous_ids = unique_ids[match_counts > 1]
-            if ambiguous_ids.size > 0:
-                raise ValueError(
-                    f"contact_ids {ambiguous_ids.tolist()} are not unique across probes, "
-                    "you should provide probe_ids to disambiguate"
-                )
-            # follow the requested contact_ids order
-            blocks = [np.flatnonzero(all_contact_ids == contact_id) for contact_id in contact_ids]
+            probe_ids = [None] * len(contact_ids)
         else:
-            # probe_ids is paired with contact_ids: probe_ids[i] tells which probe
-            # contact_ids[i] belongs to, disambiguating ids shared across probes
-            probe_ids = np.asarray(probe_ids)
-            if probe_ids.size != contact_ids.size:
+            if len(probe_ids) != len(contact_ids):
                 raise ValueError(
-                    f"probe_ids must have the same length as contact_ids " f"({probe_ids.size} != {contact_ids.size})"
+                    f"probe_ids must be the same length as contact_ids, but got {len(probe_ids)} probe_ids and {len(contact_ids)} contact_ids."
                 )
-            pairs = list(zip(contact_ids.tolist(), probe_ids.tolist()))
-            if len(set(pairs)) != len(pairs):
-                raise ValueError("(contact_id, probe_id) pairs must be unique")
-            # contact_ids drives the order, probe_ids breaks ties between duplicated ids
-            blocks = [
-                np.flatnonzero((all_contact_ids == contact_id) & (all_probe_ids == probe_id))
-                for contact_id, probe_id in zip(contact_ids, probe_ids)
-            ]
 
-        selection = np.concatenate(blocks) if len(blocks) else np.array([], dtype=int)
-        return self.get_slice(selection)
+        indices = []
+        for contact_id, probe_id in zip(contact_ids, probe_ids):
+            if probe_id is None:
+                probe_condition = True
+            else:
+                probe_condition = all_probe_ids == probe_id
+
+            # find the contact id within the specified probe
+            matches = np.flatnonzero((all_contact_ids == contact_id) & probe_condition)
+            if matches.size == 0:
+                raise ValueError(f"contact_id {contact_id} not found in probe {probe_id}")
+            elif matches.size > 1:
+                raise ValueError(
+                    f"contact_id {contact_id} is not unique within probe {probe_id}, "
+                    "this should not happen unless the probe has duplicate contact ids"
+                )
+            if matches[0] in indices:
+                raise ValueError(
+                    f"contact_id {contact_id} in probe {probe_id} has a duplicate selection, please check your input"
+                )
+            indices.append(matches[0])
+        return self.get_slice(indices)
 
     def check_global_device_wiring_and_ids(self) -> None:
         # check unique device_channel_indices for !=-1

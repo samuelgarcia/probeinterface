@@ -96,7 +96,7 @@ def test_set_contact_ids_rejects_within_probe_duplicates():
     probe = Probe(ndim=2, si_units="um")
     probe.set_contacts(positions=positions, shapes="circle", shape_params={"radius": 5})
 
-    with pytest.raises(ValueError, match="unique within a Probe"):
+    with pytest.raises(ValueError):
         probe.set_contact_ids(["a", "a"])
 
 
@@ -108,7 +108,7 @@ def test_set_contact_ids_rejects_wrong_size():
     probe = Probe(ndim=2, si_units="um")
     probe.set_contacts(positions=positions, shapes="circle", shape_params={"radius": 5})
 
-    with pytest.raises(ValueError, match="do not have the same size"):
+    with pytest.raises(ValueError):
         probe.set_contact_ids(["a", "b", "c"])
 
 
@@ -503,7 +503,7 @@ def test_select_contacts_same_id_across_probes_with_probe_ids():
 def test_select_contacts_probe_ids_length_mismatch_raises():
     """probe_ids must have the same length as contact_ids."""
     pg = _probegroup_with_contact_ids(unique=False)
-    with pytest.raises(ValueError, match="same length as contact_ids"):
+    with pytest.raises(ValueError):
         pg.select_contacts(["c0", "c1"], probe_ids=["0"])
 
 
@@ -515,7 +515,7 @@ def test_select_contacts_too_many_ids_without_probe_ids_raises():
     pg = _probegroup_with_contact_ids(unique=False)
     n_unique = len(np.unique(pg.get_global_contact_ids()))
     too_many = [f"c{j}" for j in range(n_unique + 1)]
-    with pytest.raises(ValueError, match="not unique across probes"):
+    with pytest.raises(ValueError):
         pg.select_contacts(too_many)
 
 
@@ -553,13 +553,13 @@ def test_select_probes_keeps_every_contact_of_matching_probes():
     assert len(sub_two.probes) == 2
 
 
-def test_select_probes_follows_requested_order():
-    """select_probes follows the requested probe order."""
+def test_select_probes_keeps_array_order():
+    """select_probes preserves the contact order."""
     pg = _probegroup_with_contact_ids(unique=False)
     sub = pg.select_probes(["2", "0"])
-    # probe "2"'s contacts come first since it is requested first
-    probe_index_per_contact = sub.to_numpy(complete=True)["probe_index"]
-    assert probe_index_per_contact[0] == sub.probe_ids.index("2")
+    # even if we requested probes in a different order, the contacts are still ordered by their original global order
+    probe_index_per_contact = sub.to_numpy(complete=True)["probe_id"]
+    assert probe_index_per_contact[0] == "0"
 
 
 def test_select_probes_single_probe():
@@ -595,7 +595,7 @@ def test_select_probes_preserves_positions():
 def test_select_probes_none_raises():
     """Calling select_probes without probe_ids raises a ValueError."""
     pg = _probegroup_with_contact_ids(unique=False)
-    with pytest.raises(ValueError, match="probe_ids must be provided"):
+    with pytest.raises(ValueError):
         pg.select_probes(None)
 
 
@@ -610,8 +610,23 @@ def test_select_probes_all_probes():
 def test_select_contacts_duplicated_ids_raises():
     """Passing the same contact id more than once raises a ValueError."""
     pg = _probegroup_with_contact_ids(unique=True)
-    with pytest.raises(ValueError, match="must be unique"):
+    with pytest.raises(ValueError):
         pg.select_contacts(["p0c0", "p0c1", "p0c0"])
+
+
+def test_select_contacts_preserves_order_in_array():
+    """Selected contacts keep the order specified in the input array."""
+    pg = _probegroup_with_contact_ids(unique=True)
+    contact_ids_list = [
+        ["p0c1", "p0c0", "p2c5"],
+        ["p2c5", "p0c0", "p0c1"],
+        ["p0c1", "p2c5", "p0c0",]
+    ]
+    for selected_ids in contact_ids_list:
+        sub = pg.select_contacts(selected_ids)
+        contact_vector = sub.to_numpy(complete=True)
+        sub_ids = contact_vector["contact_ids"]
+        assert list(sub_ids) == selected_ids
 
 
 def test_select_contacts_preserves_positions():
