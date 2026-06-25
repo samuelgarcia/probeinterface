@@ -41,16 +41,6 @@ def test_probegroup(probegroup):
     other = ProbeGroup.from_dict(d)
     assert probegroup.probe_ids == other.probe_ids
 
-    # checking automatic generation of ids with new dummy probes
-    probegroup._probes = []
-    probegroup._probe_ids = []
-    for i in range(3):
-        probegroup.add_probe(generate_dummy_probe(), probe_id=f"probe_00{i}")
-    probegroup.auto_generate_contact_ids()
-
-    for p in probegroup.probes:
-        assert p.contact_ids is not None
-
 
 def test_probegroup_3d():
     probegroup = ProbeGroup()

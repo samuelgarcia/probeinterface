@@ -82,23 +82,6 @@ class ProbeGroup:
     def probe_ids(self) -> list:
         return self._probe_ids
 
-    @probe_ids.setter
-    def probe_ids(self, probe_ids: list) -> None:
-        """
-        Set the probe IDs for the ProbeGroup.
-
-        Parameters
-        ----------
-        probe_ids: list
-            A list of IDs to assign to the probes.
-            The length of the list must match the number of probes in the ProbeGroup.
-        """
-        if len(probe_ids) != len(self._probes):
-            raise ValueError(
-                f"Length of probe_ids ({len(probe_ids)}) does not match number of probes ({len(self._probes)})"
-            )
-        self._probe_ids = probe_ids
-
     def _check_compatible(self, probe: Probe) -> None:
         if probe._probe_group is not None:
             raise ValueError(
