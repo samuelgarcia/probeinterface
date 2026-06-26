@@ -55,7 +55,8 @@ class ProbeGroup:
             if probe_id_annotation is not None:
                 probe_id = probe_id_annotation
             else:
-                probe_id = f"{len(self._probes)}"
+                existing_int_ids = [int(pid) for pid in self._probe_ids if pid.isdigit()]
+                probe_id = str(max(existing_int_ids, default=-1) + 1)
         else:
             if probe_id_annotation is not None and probe_id != probe_id_annotation:
                 warnings.warn(
@@ -96,7 +97,7 @@ class ProbeGroup:
         # check global channel maps
         self._probes.append(probe)
         self._probe_ids.append(f"{len(self._probes)-1}")
-        self.check_global_device_wiring_and_ids()
+        self._check_global_device_wiring_and_ids()
         self._probes = self.probes[:-1]
         self._probe_ids = self.probe_ids[:-1]
 
@@ -502,13 +503,10 @@ class ProbeGroup:
 
         indices = []
         for contact_id, probe_id in zip(contact_ids, probe_ids):
-            if probe_id is None:
-                probe_condition = True
-            else:
-                probe_condition = all_probe_ids == probe_id
-
             # find the contact id within the specified probe
-            matches = np.flatnonzero((all_contact_ids == contact_id) & probe_condition)
+            in_probe_mask = np.ones(all_contact_ids.size, dtype=bool) if probe_id is None else all_probe_ids == probe_id
+            matches = np.flatnonzero((all_contact_ids == contact_id) & in_probe_mask)
+
             if matches.size == 0:
                 raise ValueError(f"contact_id {contact_id} not found in probe {probe_id}")
             elif matches.size > 1:
@@ -518,12 +516,13 @@ class ProbeGroup:
                 )
             if matches[0] in indices:
                 raise ValueError(
-                    f"contact_id {contact_id} in probe {probe_id} has a duplicate selection, please check your input"
+                    f"contact_id {contact_id} matches multiple probes; "
+                    "pass probe_ids to disambiguate which probe each contact_id belongs to."
                 )
             indices.append(matches[0])
         return self.get_slice(indices)
 
-    def check_global_device_wiring_and_ids(self) -> None:
+    def _check_global_device_wiring_and_ids(self) -> None:
         # check unique device_channel_indices for !=-1
         chans = self.get_global_device_channel_indices()
         keep = chans["device_channel_indices"] >= 0

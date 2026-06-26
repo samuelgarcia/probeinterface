@@ -534,7 +534,7 @@ class Probe:
             )
         self.device_channel_indices = channel_indices
         if self._probe_group is not None:
-            self._probe_group.check_global_device_wiring_and_ids()
+            self._probe_group._check_global_device_wiring_and_ids()
 
     def wiring_to_device(self, pathway: str, channel_offset: int = 0):
         """
@@ -584,7 +584,7 @@ class Probe:
 
         self._contact_ids = contact_ids
         if self._probe_group is not None:
-            self._probe_group.check_global_device_wiring_and_ids()
+            self._probe_group._check_global_device_wiring_and_ids()
 
     def set_shank_ids(self, shank_ids: np.ndarray | list):
         """
