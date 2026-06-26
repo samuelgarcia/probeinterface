@@ -636,6 +636,41 @@ def test_select_contacts_preserves_positions():
     np.testing.assert_array_equal(got, expected)
 
 
+# ── add_probe : default probe_id generation ─────────────────────────────────
+
+
+def test_add_probe_default_id_does_not_recycle_after_gap():
+    """
+    The default probe_id must not collide with an existing id after a selection
+    leaves a gap in the numeric ids. Using ``len(self._probes)`` would point back
+    at an id that is still in use; ``max(numeric ids) + 1`` is gap-proof.
+    """
+    pg = ProbeGroup()
+    for _ in range(3):
+        pg.add_probe(generate_dummy_probe())
+    assert pg.probe_ids == ["0", "1", "2"]
+
+    # drop the middle probe -> ids become ["0", "2"], len is 2 (would collide with "2")
+    sub = pg.select_probes(["0", "2"])
+    assert sub.probe_ids == ["0", "2"]
+
+    sub.add_probe(generate_dummy_probe())
+    assert sub.probe_ids == ["0", "2", "3"]
+
+
+def test_add_probe_default_id_with_non_numeric_ids():
+    """
+    With only non-numeric ids present, the generated id starts from "0" and can
+    never collide with a non-numeric name.
+    """
+    pg = ProbeGroup()
+    pg.add_probe(generate_dummy_probe(), probe_id="left")
+    pg.add_probe(generate_dummy_probe(), probe_id="right")
+
+    pg.add_probe(generate_dummy_probe())
+    assert pg.probe_ids == ["left", "right", "0"]
+
+
 if __name__ == "__main__":
     probegroup = _make_probegroup()
 
